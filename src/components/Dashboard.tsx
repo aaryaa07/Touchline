@@ -1,7 +1,18 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, MapPin, Trophy } from 'lucide-react';
+import {
+  ArrowLeft,
+  Building2,
+  CalendarDays,
+  ExternalLink,
+  Home,
+  MapPin,
+  Trophy,
+  UserCircle2,
+  UserSquare2,
+} from 'lucide-react';
 import type {
+  ClubProfile,
   FormGame,
   League,
   NewsItem,
@@ -30,6 +41,7 @@ export function Dashboard({
   const [form, setForm] = useState<FormGame[] | null>(null);
   const [standings, setStandings] = useState<StandingRow[] | null>(null);
   const [news, setNews] = useState<NewsItem[] | null>(null);
+  const [profile, setProfile] = useState<ClubProfile | null>(null);
 
   const [loadingForm, setLoadingForm] = useState(true);
   const [loadingStandings, setLoadingStandings] = useState(true);
@@ -45,6 +57,11 @@ export function Dashboard({
       .team(league.id, team.id)
       .then((d) => !stop && setDetails(d))
       .catch(() => {});
+
+    api
+      .profile(league.id, team.id)
+      .then((p) => !stop && setProfile(p))
+      .catch(() => !stop && setProfile(null));
 
     api
       .form(league.id, team.id)
@@ -174,12 +191,6 @@ export function Dashboard({
                     <strong className="text-white">{details.record}</strong>
                   </span>
                 )}
-                {details?.venue && (
-                  <span className="inline-flex items-center gap-2">
-                    <MapPin className="w-4 h-4 text-zinc-500" />
-                    {details.venue}
-                  </span>
-                )}
               </div>
               {details?.standingSummary && (
                 <p className="mt-3 italic text-zinc-400 text-sm">
@@ -188,6 +199,83 @@ export function Dashboard({
               )}
             </div>
           </div>
+
+          {/* --- Club identity row (only renders fields we have) --- */}
+          {profile && hasAnyIdentity(profile) && (
+            <div className="relative border-t border-white/10 px-8 sm:px-10 py-5">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-6 gap-y-3 text-sm">
+                {(profile.city || profile.country) && (
+                  <Identity
+                    icon={MapPin}
+                    label="Location"
+                    value={[profile.city, profile.country]
+                      .filter(Boolean)
+                      .join(', ')}
+                    accent={league.accent}
+                  />
+                )}
+                {profile.stadium && (
+                  <Identity
+                    icon={Home}
+                    label="Stadium"
+                    value={profile.stadium}
+                    sub={
+                      profile.capacity
+                        ? `cap. ${profile.capacity.toLocaleString()}`
+                        : undefined
+                    }
+                    accent={league.accent}
+                  />
+                )}
+                {profile.founded && (
+                  <Identity
+                    icon={CalendarDays}
+                    label="Founded"
+                    value={String(profile.founded)}
+                    sub={
+                      new Date().getFullYear() - profile.founded > 0
+                        ? `${new Date().getFullYear() - profile.founded} years`
+                        : undefined
+                    }
+                    accent={league.accent}
+                  />
+                )}
+                {profile.manager && (
+                  <Identity
+                    icon={UserCircle2}
+                    label="Manager"
+                    value={profile.manager}
+                    accent={league.accent}
+                  />
+                )}
+                {profile.owner && (
+                  <Identity
+                    icon={Building2}
+                    label="Owner"
+                    value={profile.owner.split('(')[0].trim()}
+                    accent={league.accent}
+                  />
+                )}
+                {profile.chairman && (
+                  <Identity
+                    icon={UserSquare2}
+                    label="Chairman"
+                    value={profile.chairman}
+                    accent={league.accent}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* --- Trophy distribution rail --- */}
+          {profile?.trophies && profile.trophies.length > 0 && (
+            <TrophyRail
+              trophies={profile.trophies}
+              accent={league.accent}
+              wikiUrl={profile.wikiUrl}
+            />
+          )}
         </motion.section>
 
         {/* Form strip + standings + news + chat */}
@@ -270,6 +358,127 @@ function SectionHeader({
       <h2 className="font-display text-2xl tracking-wider text-white">
         {title}
       </h2>
+    </div>
+  );
+}
+
+function hasAnyIdentity(p: ClubProfile) {
+  return !!(
+    p.city ||
+    p.country ||
+    p.stadium ||
+    p.founded ||
+    p.manager ||
+    p.owner ||
+    p.chairman
+  );
+}
+
+function Identity({
+  icon: Icon,
+  label,
+  value,
+  sub,
+  accent,
+}: {
+  icon: any;
+  label: string;
+  value: string;
+  sub?: string;
+  accent: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <div
+        className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.2em] text-zinc-400 mb-1"
+      >
+        <Icon className="w-3.5 h-3.5" style={{ color: accent }} />
+        {label}
+      </div>
+      <div className="text-zinc-100 font-medium leading-tight truncate" title={value}>
+        {value}
+      </div>
+      {sub && (
+        <div className="text-[11px] text-zinc-500 mt-0.5">{sub}</div>
+      )}
+    </div>
+  );
+}
+
+function TrophyRail({
+  trophies,
+  accent,
+  wikiUrl,
+}: {
+  trophies: NonNullable<ClubProfile['trophies']>;
+  accent: string;
+  wikiUrl?: string;
+}) {
+  // Group by category, sort by count desc within group
+  const grouped = new Map<string, typeof trophies>();
+  for (const t of trophies) {
+    const key = t.category || 'Other';
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key)!.push(t);
+  }
+  for (const arr of grouped.values()) arr.sort((a, b) => b.count - a.count);
+  const totalTrophies = trophies.reduce((sum, t) => sum + t.count, 0);
+
+  return (
+    <div className="relative border-t border-white/10 px-8 sm:px-10 py-5">
+      <div className="flex items-baseline justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <Trophy className="w-3.5 h-3.5" style={{ color: accent }} />
+          <span className="text-[10px] uppercase tracking-[0.3em] text-zinc-400">
+            Honours
+          </span>
+          <span
+            className="text-xs tabular-nums ml-2"
+            style={{ color: accent }}
+          >
+            {totalTrophies} total titles
+          </span>
+        </div>
+        {wikiUrl && (
+          <a
+            href={wikiUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest text-zinc-500 hover:text-zinc-300"
+          >
+            Wikipedia <ExternalLink className="w-3 h-3" />
+          </a>
+        )}
+      </div>
+
+      <div className="space-y-3">
+        {Array.from(grouped.entries()).map(([category, items]) => (
+          <div key={category} className="flex items-start gap-3">
+            <span
+              className="shrink-0 mt-2 text-[10px] uppercase tracking-widest text-zinc-500 w-20"
+            >
+              {category}
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {items.map((t) => (
+                <span
+                  key={t.competition}
+                  className="inline-flex items-baseline gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs"
+                  title={`${t.competition}: ${t.count}`}
+                >
+                  <span
+                    className="font-display tabular-nums leading-none text-base"
+                    style={{ color: accent }}
+                  >
+                    {t.count}
+                  </span>
+                  <span className="text-zinc-200">{t.competition}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

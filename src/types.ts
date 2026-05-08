@@ -72,3 +72,26 @@ export type ChatMessage = {
   role: 'user' | 'assistant';
   content: string;
 };
+
+export type TrophyEntry = {
+  category: string;
+  competition: string;
+  count: number;
+};
+
+export type ClubProfile = {
+  title: string;
+  wikiUrl: string;
+  description?: string;
+  extract?: string;
+  founded?: number | null;
+  foundedRaw?: string | null;
+  stadium?: string | null;
+  capacity?: number | null;
+  city?: string | null;
+  country?: string | null;
+  owner?: string | null;
+  chairman?: string | null;
+  manager?: string | null;
+  trophies?: TrophyEntry[];
+};

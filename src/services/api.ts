@@ -5,6 +5,7 @@ import type {
   FormGame,
   NewsItem,
   ChatMessage,
+  ClubProfile,
 } from '../types';
 
 async function getJSON<T>(url: string): Promise<T> {
@@ -25,6 +26,8 @@ export const api = {
     getJSON<TeamDetails>(`/api/teams/${league}/${teamId}`),
   form: (league: string, teamId: string) =>
     getJSON<FormGame[]>(`/api/teams/${league}/${teamId}/form`),
+  profile: (league: string, teamId: string) =>
+    getJSON<ClubProfile | null>(`/api/teams/${league}/${teamId}/profile`),
   leagueNews: (league: string) =>
     getJSON<NewsItem[]>(`/api/leagues/${league}/news`),
   teamNews: (league: string, teamName: string) =>
