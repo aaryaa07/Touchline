@@ -1,0 +1,21 @@
+League Name,Country,Club Name,Short Name,Official News URL,Primary Color Hex,Secondary Color Hex,Current League Position
+Premier League,England,Arsenal F.C.,ARS,https://www.arsenal.com/news,#EF0107,#FFFFFF,1
+Premier League,England,Manchester City F.C.,MCI,https://www.mancity.com/news,#6CABDD,#1C2C5B,2
+Premier League,England,Manchester United F.C.,MUN,https://www.manutd.com/news,#DA291C,#FBE122,3
+Premier League,England,Liverpool F.C.,LIV,https://www.liverpoolfc.com/news,#C8102E,#F6EB61,4
+Premier League,England,Aston Villa F.C.,AVL,https://www.avfc.co.uk/news,#95BFE5,#670E36,5
+Premier League,England,AFC Bournemouth,BOU,https://www.afcb.co.uk/news,#DA291C,#000000,6
+Premier League,England,Brentford F.C.,BRE,https://www.brentfordfc.com/news,#E30613,#FFFFFF,7
+Premier League,England,Brighton & Hove Albion F.C.,BHA,https://www.brightonandhovealbion.com/news,#0057B8,#FFFFFF,8
+Premier League,England,Chelsea F.C.,CHE,https://www.chelseafc.com/news,#034694,#DBA111,9
+Premier League,England,Everton F.C.,EVE,https://www.evertonfc.com/news,#003399,#FFFFFF,10
+Premier League,England,Fulham F.C.,FUL,https://www.fulhamfc.com/news,#FFFFFF,#000000,11
+Premier League,England,Sunderland A.F.C.,SUN,https://safc.com/news,#E2001A,#FFFFFF,12
+Premier League,England,Newcastle United F.C.,NEW,https://www.nufc.co.uk/news,#000000,#FFFFFF,13
+Premier League,England,Leeds United F.C.,LEE,https://www.leedsunited.com/news,#FFFFFF,#FFCD00,14
+Premier League,England,Crystal Palace F.C.,CRY,https://www.cpfc.co.uk/news,#C4122E,#1B458F,15
+Premier League,England,Nottingham Forest F.C.,NFO,https://www.nottinghamforest.co.uk/news,#DD0000,#FFFFFF,16
+Premier League,England,Tottenham Hotspur F.C.,TOT,https://www.tottenhamhotspur.com/news,#FFFFFF,#132257,17
+Premier League,England,West Ham United F.C.,WHU,https://www.whufc.com/news,#7A263A,#1BB1E7,18
+Premier League,England,Burnley F.C.,BUR,https://www.burnleyfootballclub.com/news,#6C1D45,#99C1E7,19
+Premier League,England,Wolverhampton Wanderers,WOL,https://www.wolves.co.uk/news,#FDB913,#000000,20

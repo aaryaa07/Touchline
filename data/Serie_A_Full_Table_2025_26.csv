@@ -1,0 +1,21 @@
+League Name,Country,Club Name,Short Name,Official News URL,Primary Color Hex,Secondary Color Hex,Current League Position
+Serie A,Italy,Inter Milan,INT,https://www.inter.it/en/news,#0068A8,#000000,1
+Serie A,Italy,SSC Napoli,NAP,https://sscnapoli.it/en/news/,#003E7E,#FFFFFF,2
+Serie A,Italy,AC Milan,ACM,https://www.acmilan.com/en/news,#FB090B,#000000,3
+Serie A,Italy,Juventus FC,JUV,https://www.juventus.com/en/news/,#000000,#FFFFFF,4
+Serie A,Italy,AS Roma,ROM,https://www.asroma.com/en/news,#8E1F2F,#F0BC42,5
+Serie A,Italy,Como 1907,COM,https://comofootball.com/en/news/,#0253A3,#FFFFFF,6
+Serie A,Italy,Atalanta BC,ATA,https://www.atalanta.it/en/news/,#1E488F,#000000,7
+Serie A,Italy,S.S. Lazio,LAZ,https://www.sslazio.it/en/news,#87CEFA,#FFFFFF,8
+Serie A,Italy,Bologna FC 1909,BOL,https://www.bolognafc.it/en/news/,#A10C27,#172B4D,9
+Serie A,Italy,U.S. Sassuolo Calcio,SAS,https://www.sassuolocalcio.it/en/news/,#008F4F,#000000,10
+Serie A,Italy,Udinese Calcio,UDI,https://www.udinese.it/news,#000000,#FFFFFF,11
+Serie A,Italy,Parma Calcio 1913,PAR,https://parmacalcio1913.com/news/,#FFD700,#002A54,12
+Serie A,Italy,Torino FC,TOR,https://www.torinofc.it/en/news,#8A1538,#FFFFFF,13
+Serie A,Italy,Genoa CFC,GEN,https://genoacfc.it/en/news/,#B01E2E,#00285C,14
+Serie A,Italy,Cagliari Calcio,CAG,https://www.cagliaricalcio.com/en/news/,#C01A39,#002350,15
+Serie A,Italy,ACF Fiorentina,FIO,https://www.acffiorentina.com/en/news,#4A2583,#FFFFFF,16
+Serie A,Italy,U.S. Lecce,LEC,https://www.uslecce.it/en/news,#FFD700,#ED1C24,17
+Serie A,Italy,US Cremonese,CRE,https://www.uscremonese.it/news/,#8A8D8F,#ED1C24,18
+Serie A,Italy,Hellas Verona FC,VER,https://www.hellasverona.it/en/news,#FDE100,#002B5C,19
+Serie A,Italy,Pisa Sporting Club,PIS,https://pisasportingclub.com/news/,#000000,#002654,20
