@@ -504,9 +504,12 @@ app.get('/api/teams/:league/:teamId/profile', async (req, res) => {
     const teamName = teamData?.team?.displayName;
     if (!teamName) return res.json(null);
 
-    const profile = await cached(
-      `profile:${league}:${teamId}`,
-      async () => {
+    // Build the profile each call. The expensive bits (wiki summary, section
+    // HTML, Wikidata claims) are individually cached for 24h, so a complete
+    // build is essentially free once warm. We avoid an outer profile cache so
+    // a partial result (trophies missing due to rate limit, etc.) doesn't
+    // get pinned for 24h.
+    const profile = await (async () => {
         const title = await findClubArticle(
           teamName,
           LEAGUE_COUNTRY[league] || []
@@ -591,9 +594,7 @@ app.get('/api/teams/:league/:teamId/profile', async (req, res) => {
             null,
           trophies,
         };
-      },
-      TTL_PROFILE
-    );
+      })();
 
     res.json(profile);
   } catch (e: any) {

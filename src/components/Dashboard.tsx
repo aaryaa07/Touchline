@@ -451,14 +451,12 @@ function TrophyRail({
         )}
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-4">
         {Array.from(grouped.entries()).map(([category, items]) => (
-          <div key={category} className="flex items-start gap-3">
-            <span
-              className="shrink-0 mt-2 text-[10px] uppercase tracking-widest text-zinc-500 w-20"
-            >
+          <div key={category}>
+            <div className="text-[10px] uppercase tracking-[0.25em] text-zinc-500 mb-2">
               {category}
-            </span>
+            </div>
             <div className="flex flex-wrap gap-1.5">
               {items.map((t) => (
                 <span
