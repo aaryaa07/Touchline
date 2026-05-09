@@ -10,6 +10,10 @@ export type League = {
   bg: string;
   surface: string;
   pattern: string;
+  logo: string;
+  /** Optional CSS filter applied to the league logo (e.g. to flip a
+   *  black-on-transparent mark to white when the card background is dark). */
+  logoFilter?: string;
 };
 
 export type Team = {
@@ -71,12 +75,46 @@ export type NewsItem = {
 export type ChatMessage = {
   role: 'user' | 'assistant';
   content: string;
+  toolsUsed?: { name: string; args: Record<string, unknown> }[];
 };
 
 export type TrophyEntry = {
   category: string;
   competition: string;
   count: number;
+};
+
+export type LeagueMatch = {
+  id: string;
+  date: string;
+  home: string;
+  homeShort?: string;
+  homeScore: number | null;
+  away: string;
+  awayShort?: string;
+  awayScore: number | null;
+  state: 'pre' | 'in' | 'post' | 'unknown';
+  status: string;
+  competition?: string;
+};
+
+export type LeagueContext = {
+  upcoming: LeagueMatch[];
+  recent: LeagueMatch[];
+};
+
+export type Leader = {
+  rank: number;
+  player: string;
+  club: string;
+  value: number;
+};
+
+export type LeagueLeaders = {
+  topScorers: Leader[];
+  cleanSheets: Leader[];
+  season: number;
+  source?: string;
 };
 
 export type ClubProfile = {

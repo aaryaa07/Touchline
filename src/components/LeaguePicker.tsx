@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, Code2 } from 'lucide-react';
 import { LEAGUES } from '../data/leagues';
 import type { League } from '../types';
 
@@ -29,10 +29,12 @@ export function LeaguePicker({ onSelect }: { onSelect: (l: League) => void }) {
               LINE
             </span>
           </h1>
-          <p className="mt-6 max-w-xl text-zinc-300 text-lg leading-relaxed">
-            Your team. The latest. Zero noise. Pick a league to get going —
-            we'll line up the news, the table, the last five, and a writer
-            you can chat with.
+          <p className="mt-6 max-w-2xl text-zinc-300 text-lg leading-relaxed">
+            Running late for school, office, no time for your team? Get quick
+            updates from the chat — but I too would not take it{' '}
+            <em className="not-italic text-white">extremely</em> seriously if
+            I were you. Just a Human in the Loop. Keeping the kid inside you
+            alive&nbsp;:)
           </p>
         </header>
 
@@ -49,16 +51,22 @@ export function LeaguePicker({ onSelect }: { onSelect: (l: League) => void }) {
           {LEAGUES.map((league, i) => (
             <motion.button
               key={league.id}
-              initial={{ opacity: 0, y: 24 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.07, duration: 0.5, ease: 'easeOut' }}
-              whileHover={{ y: -4 }}
-              whileTap={{ scale: 0.98 }}
+              initial={{ opacity: 0, y: 28, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{
+                delay: i * 0.06,
+                duration: 0.55,
+                ease: [0.16, 1, 0.3, 1],
+              }}
+              whileHover={{ y: -6, scale: 1.015 }}
+              whileTap={{ scale: 0.97 }}
               onClick={() => onSelect(league)}
-              className="group relative text-left rounded-2xl overflow-hidden border border-zinc-800 hover:border-zinc-600 transition-colors"
+              className="group relative text-left rounded-2xl overflow-hidden border border-zinc-800 hover:border-zinc-600 transition-colors duration-300"
               style={{
                 background: league.surface,
                 minHeight: 280,
+                boxShadow:
+                  '0 1px 0 rgba(255,255,255,0.04) inset, 0 18px 50px -28px rgba(0,0,0,0.8)',
               }}
             >
               <div
@@ -74,10 +82,21 @@ export function LeaguePicker({ onSelect }: { onSelect: (l: League) => void }) {
 
               <div className="relative h-full p-6 flex flex-col justify-between">
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px] uppercase tracking-[0.25em] text-zinc-300/80">
-                      {league.country}
-                    </span>
+                  <div className="flex items-center justify-between mb-3">
+                    {/* Brand mark — fixed-height box, object-contain keeps every
+                        league's aspect ratio intact, max-width caps tall logos
+                        from getting too narrow. logoFilter handles edge cases
+                        like Ligue 1's black-on-transparent SVG. */}
+                    <div className="h-12 w-[88px] flex items-center justify-start">
+                      <img
+                        src={league.logo}
+                        alt={`${league.name} logo`}
+                        className="max-h-12 max-w-full object-contain object-left drop-shadow-[0_2px_8px_rgba(0,0,0,0.5)]"
+                        style={{
+                          filter: league.logoFilter,
+                        }}
+                      />
+                    </div>
                     <span
                       className="text-[10px] uppercase tracking-[0.2em] px-2 py-0.5 rounded-full border"
                       style={{
@@ -88,6 +107,9 @@ export function LeaguePicker({ onSelect }: { onSelect: (l: League) => void }) {
                       25/26
                     </span>
                   </div>
+                  <span className="text-[10px] uppercase tracking-[0.25em] text-zinc-300/80 block mb-2">
+                    {league.country}
+                  </span>
                   <h3 className="font-display text-4xl sm:text-5xl leading-[0.9] tracking-tight text-white drop-shadow-[0_2px_30px_rgba(0,0,0,0.5)]">
                     {league.name.split(' ').map((w, idx) => (
                       <span key={idx} className="block">
@@ -102,7 +124,7 @@ export function LeaguePicker({ onSelect }: { onSelect: (l: League) => void }) {
                     “{league.tagline}”
                   </p>
                   <div
-                    className="inline-flex items-center gap-2 text-sm font-medium transition-transform group-hover:translate-x-1"
+                    className="inline-flex items-center gap-2 text-sm font-medium transition-all duration-300 group-hover:translate-x-1"
                     style={{ color: league.accent }}
                   >
                     Pick this league <ArrowRight className="w-4 h-4" />
@@ -113,10 +135,23 @@ export function LeaguePicker({ onSelect }: { onSelect: (l: League) => void }) {
           ))}
         </div>
 
-        <footer className="mt-16 text-xs text-zinc-500 flex items-center gap-2">
-          <span>Powered by ESPN public data + Groq llama-3.3-70b.</span>
-          <span className="text-zinc-700">·</span>
-          <span>Headlines update every 5 minutes.</span>
+        <footer className="mt-16 text-xs text-zinc-500 flex flex-col gap-1.5">
+          <span className="inline-flex items-center gap-1.5">
+            Built by{' '}
+            <strong className="text-zinc-300 font-medium">
+              Aryaman Singh
+            </strong>{' '}
+            using{' '}
+            <span className="inline-flex items-center gap-1 text-zinc-300">
+              <Code2 className="w-3.5 h-3.5" />
+              Claude Code
+            </span>{' '}
+            as his fellow collaborator.
+          </span>
+          <span className="text-zinc-600">
+            Powered by ESPN public data + Groq llama-3.3-70b · Headlines
+            refresh every 5 minutes.
+          </span>
         </footer>
       </div>
     </div>

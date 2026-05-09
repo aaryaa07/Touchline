@@ -6,6 +6,8 @@ import type {
   NewsItem,
   ChatMessage,
   ClubProfile,
+  LeagueContext,
+  LeagueLeaders,
 } from '../types';
 
 async function getJSON<T>(url: string): Promise<T> {
@@ -20,8 +22,16 @@ async function getJSON<T>(url: string): Promise<T> {
 export const api = {
   teams: (league: string) =>
     getJSON<Team[]>(`/api/leagues/${league}/teams`),
-  standings: (league: string) =>
-    getJSON<StandingRow[]>(`/api/leagues/${league}/standings`),
+  standings: (league: string, season?: number) =>
+    getJSON<StandingRow[]>(
+      `/api/leagues/${league}/standings${season ? `?season=${season}` : ''}`
+    ),
+  leagueContext: (league: string) =>
+    getJSON<LeagueContext>(`/api/leagues/${league}/context`),
+  leaders: (league: string, season: number) =>
+    getJSON<LeagueLeaders>(
+      `/api/leagues/${league}/leaders?season=${season}`
+    ),
   team: (league: string, teamId: string) =>
     getJSON<TeamDetails>(`/api/teams/${league}/${teamId}`),
   form: (league: string, teamId: string) =>
@@ -37,7 +47,10 @@ export const api = {
   chat: async (
     messages: ChatMessage[],
     context: Record<string, unknown>
-  ): Promise<{ reply: string }> => {
+  ): Promise<{
+    reply: string;
+    toolsUsed?: { name: string; args: Record<string, unknown> }[];
+  }> => {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

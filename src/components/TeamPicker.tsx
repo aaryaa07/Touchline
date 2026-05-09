@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { ArrowLeft, Search } from 'lucide-react';
 import type { League, Team } from '../types';
 import { api } from '../services/api';
+import { LeagueLoader } from './LeagueLoader';
 
 export function TeamPicker({
   league,
@@ -88,13 +89,12 @@ export function TeamPicker({
         )}
 
         {!filtered && !error && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-            {Array.from({ length: 20 }).map((_, i) => (
-              <div
-                key={i}
-                className="aspect-[4/3] rounded-xl bg-white/5 animate-pulse"
-              />
-            ))}
+          <div className="flex flex-col items-center justify-center py-20">
+            <LeagueLoader
+              league={league}
+              size="lg"
+              label={`Loading ${league.name}…`}
+            />
           </div>
         )}
 
@@ -103,13 +103,17 @@ export function TeamPicker({
             {filtered.map((team, i) => (
               <motion.button
                 key={team.id}
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: Math.min(i * 0.02, 0.4), duration: 0.3 }}
-                whileHover={{ y: -3 }}
-                whileTap={{ scale: 0.97 }}
+                initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{
+                  delay: Math.min(i * 0.02, 0.4),
+                  duration: 0.4,
+                  ease: [0.16, 1, 0.3, 1],
+                }}
+                whileHover={{ y: -4, scale: 1.03 }}
+                whileTap={{ scale: 0.95 }}
                 onClick={() => onSelect(team)}
-                className="group relative rounded-xl border border-white/10 hover:border-white/30 bg-black/25 hover:bg-black/40 transition-all p-4 flex flex-col items-center gap-3 text-center backdrop-blur-sm"
+                className="group relative rounded-xl border border-white/10 hover:border-white/30 bg-black/25 hover:bg-black/40 transition-colors duration-300 p-4 flex flex-col items-center gap-3 text-center backdrop-blur-sm"
                 style={{
                   ['--ring' as any]: team.color || league.accent,
                 }}

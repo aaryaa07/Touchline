@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import {
-  ArrowLeft,
   Building2,
   CalendarDays,
   ExternalLink,
   Home,
   MapPin,
+  Repeat2,
   Trophy,
   UserCircle2,
   UserSquare2,
@@ -15,6 +15,8 @@ import type {
   ClubProfile,
   FormGame,
   League,
+  LeagueContext,
+  LeagueLeaders,
   NewsItem,
   StandingRow,
   Team,
@@ -25,77 +27,120 @@ import { FormStrip } from './FormStrip';
 import { LeagueTable } from './LeagueTable';
 import { NewsFeed } from './NewsFeed';
 import { Chatbot } from './Chatbot';
+import { Leaders } from './Leaders';
+import { SeasonPicker, CURRENT_SEASON, seasonLabel } from './SeasonPicker';
+import { TeamSwitchDrawer } from './TeamSwitchDrawer';
 
 export function Dashboard({
   league,
   team,
-  onBackToTeams,
+  leagueContext,
+  onSwitchTeam,
   onBackToLeagues,
 }: {
   league: League;
   team: Team;
-  onBackToTeams: () => void;
+  leagueContext: LeagueContext | null;
+  onSwitchTeam: (league: League, team: Team) => void;
   onBackToLeagues: () => void;
 }) {
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [season, setSeason] = useState<number>(CURRENT_SEASON);
+  const isHistorical = season !== CURRENT_SEASON;
+
   const [details, setDetails] = useState<TeamDetails | null>(null);
   const [form, setForm] = useState<FormGame[] | null>(null);
   const [standings, setStandings] = useState<StandingRow[] | null>(null);
   const [news, setNews] = useState<NewsItem[] | null>(null);
   const [profile, setProfile] = useState<ClubProfile | null>(null);
+  const [leaders, setLeaders] = useState<LeagueLeaders | null>(null);
 
   const [loadingForm, setLoadingForm] = useState(true);
   const [loadingStandings, setLoadingStandings] = useState(true);
   const [loadingNews, setLoadingNews] = useState(true);
+  const [loadingLeaders, setLoadingLeaders] = useState(true);
 
   useEffect(() => {
     let stop = false;
-    setLoadingForm(true);
     setLoadingStandings(true);
-    setLoadingNews(true);
+    setLoadingLeaders(true);
 
+    // Standings refetch on every season change
     api
-      .team(league.id, team.id)
-      .then((d) => !stop && setDetails(d))
-      .catch(() => {});
-
-    api
-      .profile(league.id, team.id)
-      .then((p) => !stop && setProfile(p))
-      .catch(() => !stop && setProfile(null));
-
-    api
-      .form(league.id, team.id)
-      .then((f) => !stop && setForm(f))
-      .catch(() => !stop && setForm([]))
-      .finally(() => !stop && setLoadingForm(false));
-
-    api
-      .standings(league.id)
+      .standings(league.id, season)
       .then((s) => !stop && setStandings(s))
       .catch(() => !stop && setStandings([]))
       .finally(() => !stop && setLoadingStandings(false));
 
+    // Leaders (top scorers + clean sheets) — Wikipedia for the picked season
     api
-      .teamNews(league.id, team.name)
-      .then((n) => {
-        if (stop) return;
-        if (n.length >= 3) {
-          setNews(n);
-        } else {
-          // Fall back to league-wide news if very few team-specific hits
-          api
-            .leagueNews(league.id)
-            .then((all) => !stop && setNews([...n, ...all].slice(0, 12)))
-            .catch(() => !stop && setNews(n));
-        }
-      })
-      .catch(() => !stop && setNews([]))
-      .finally(() => !stop && setLoadingNews(false));
+      .leaders(league.id, season)
+      .then((l) => !stop && setLeaders(l))
+      .catch(() => !stop && setLeaders(null))
+      .finally(() => !stop && setLoadingLeaders(false));
+
+    // Things that only make sense for the LIVE season — skip on historical
+    if (!isHistorical) {
+      setLoadingForm(true);
+      setLoadingNews(true);
+
+      api
+        .team(league.id, team.id)
+        .then((d) => !stop && setDetails(d))
+        .catch(() => {});
+
+      api
+        .profile(league.id, team.id)
+        .then((p) => !stop && setProfile(p))
+        .catch(() => !stop && setProfile(null));
+
+      api
+        .form(league.id, team.id)
+        .then((f) => !stop && setForm(f))
+        .catch(() => !stop && setForm([]))
+        .finally(() => !stop && setLoadingForm(false));
+
+      // News stays live regardless of season selection (per design)
+      api
+        .teamNews(league.id, team.name)
+        .then((n) => {
+          if (stop) return;
+          if (n.length >= 3) {
+            setNews(n);
+          } else {
+            api
+              .leagueNews(league.id)
+              .then((all) => !stop && setNews([...n, ...all].slice(0, 12)))
+              .catch(() => !stop && setNews(n));
+          }
+        })
+        .catch(() => !stop && setNews([]))
+        .finally(() => !stop && setLoadingNews(false));
+    } else {
+      // Historical view — clear team-specific live data, keep news live
+      setForm(null);
+      setProfile(null);
+      setLoadingForm(false);
+      setLoadingNews(true);
+      api
+        .teamNews(league.id, team.name)
+        .then((n) => {
+          if (stop) return;
+          if (n.length >= 3) setNews(n);
+          else
+            api
+              .leagueNews(league.id)
+              .then((all) => !stop && setNews([...n, ...all].slice(0, 12)))
+              .catch(() => !stop && setNews(n));
+        })
+        .catch(() => !stop && setNews([]))
+        .finally(() => !stop && setLoadingNews(false));
+    }
 
     return () => {
       stop = true;
     };
-  }, [league.id, team.id, team.name]);
+  }, [league.id, team.id, team.name, season, isHistorical]);
 
   const myStanding = standings?.find((s) => s.teamId === team.id);
   const teamColor = team.color || details?.color || league.accent;
@@ -123,7 +168,7 @@ export function Dashboard({
             </button>
             <span className="text-zinc-700">/</span>
             <button
-              onClick={onBackToTeams}
+              onClick={() => setDrawerOpen(true)}
               className="hover:text-white transition-colors"
             >
               {league.name}
@@ -131,13 +176,45 @@ export function Dashboard({
             <span className="text-zinc-700">/</span>
             <span className="text-white">{team.shortName || team.name}</span>
           </div>
-          <button
-            onClick={onBackToTeams}
-            className="hidden sm:inline-flex items-center gap-1.5 text-zinc-400 hover:text-white transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" /> Change team
-          </button>
+          <div className="flex items-center gap-3">
+            <SeasonPicker
+              value={season}
+              onChange={setSeason}
+              accent={league.accent}
+            />
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setDrawerOpen(true)}
+              className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.2em] px-2.5 py-1 rounded-full border transition-colors duration-300 hover:bg-white/5"
+              style={{
+                borderColor: `${league.accent}55`,
+                color: league.accent,
+              }}
+            >
+              <Repeat2 className="w-3 h-3" />
+              Change team
+            </motion.button>
+          </div>
         </div>
+
+        {isHistorical && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+            className="mb-6 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-xs text-zinc-300 flex items-center gap-2"
+          >
+            <span
+              className="inline-block w-1.5 h-1.5 rounded-full"
+              style={{ background: league.accent }}
+            />
+            Viewing the <strong className="text-white">
+              &nbsp;{seasonLabel(season)}
+            </strong>&nbsp;season — table & top scorers reflect that year. Form,
+            ownership and the news feed stay current.
+          </motion.div>
+        )}
 
         {/* Hero */}
         <motion.section
@@ -185,14 +262,14 @@ export function Dashboard({
                     in table · {myStanding.points} pts
                   </span>
                 )}
-                {details?.record && (
+                {!isHistorical && details?.record && (
                   <span className="inline-flex items-center gap-2 tabular-nums">
                     <span className="text-zinc-500">Record</span>
                     <strong className="text-white">{details.record}</strong>
                   </span>
                 )}
               </div>
-              {details?.standingSummary && (
+              {!isHistorical && details?.standingSummary && (
                 <p className="mt-3 italic text-zinc-400 text-sm">
                   {details.standingSummary}
                 </p>
@@ -201,7 +278,7 @@ export function Dashboard({
           </div>
 
           {/* --- Club identity row (only renders fields we have) --- */}
-          {profile && hasAnyIdentity(profile) && (
+          {!isHistorical && profile && hasAnyIdentity(profile) && (
             <div className="relative border-t border-white/10 px-8 sm:px-10 py-5">
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-6 gap-y-3 text-sm">
                 {(profile.city || profile.country) && (
@@ -269,7 +346,7 @@ export function Dashboard({
           )}
 
           {/* --- Trophy distribution rail --- */}
-          {profile?.trophies && profile.trophies.length > 0 && (
+          {!isHistorical && profile?.trophies && profile.trophies.length > 0 && (
             <TrophyRail
               trophies={profile.trophies}
               accent={league.accent}
@@ -281,24 +358,30 @@ export function Dashboard({
         {/* Form strip + standings + news + chat */}
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6">
           <div className="space-y-8 min-w-0">
-            <section>
-              <SectionHeader
-                eyebrow="The last five"
-                title="FORM"
-                accent={league.accent}
-              />
-              <FormStrip games={form} loading={loadingForm} />
-            </section>
+            {!isHistorical && (
+              <section>
+                <SectionHeader
+                  eyebrow="The last five"
+                  title="FORM"
+                  accent={league.accent}
+                />
+                <FormStrip games={form} loading={loadingForm} />
+              </section>
+            )}
 
             <section>
               <SectionHeader
-                eyebrow="Where we stand"
+                eyebrow={
+                  isHistorical
+                    ? `${seasonLabel(season)} season`
+                    : 'Where we stand'
+                }
                 title="LEAGUE TABLE"
                 accent={league.accent}
               />
               <LeagueTable
                 rows={standings}
-                highlightTeamId={team.id}
+                highlightTeamId={isHistorical ? undefined : team.id}
                 loading={loadingStandings}
                 accent={league.accent}
               />
@@ -306,7 +389,27 @@ export function Dashboard({
 
             <section>
               <SectionHeader
-                eyebrow="The wire"
+                eyebrow={
+                  isHistorical
+                    ? `${seasonLabel(season)} top performers`
+                    : 'Leaders this season'
+                }
+                title="GOALS & CLEAN SHEETS"
+                accent={league.accent}
+              />
+              <Leaders
+                data={leaders}
+                loading={loadingLeaders}
+                accent={league.accent}
+                highlightClub={team.name}
+              />
+            </section>
+
+            <section>
+              <SectionHeader
+                eyebrow={
+                  isHistorical ? 'The wire — always live' : 'The wire'
+                }
                 title="HEADLINES"
                 accent={league.accent}
               />
@@ -322,11 +425,18 @@ export function Dashboard({
             <Chatbot
               context={{
                 team: team.name,
+                teamId: team.id,
                 league: league.name,
+                leagueCode: league.id,
+                season,
                 standingSummary: details?.standingSummary,
                 form: form || [],
                 standings: standings || [],
                 news: news || [],
+                upcomingFixtures: leagueContext?.upcoming || [],
+                recentResults: leagueContext?.recent || [],
+                topScorers: leaders?.topScorers || [],
+                cleanSheets: leaders?.cleanSheets || [],
               }}
               accent={league.accent}
               primary={league.primary}
@@ -334,6 +444,17 @@ export function Dashboard({
           </aside>
         </div>
       </div>
+
+      <TeamSwitchDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        currentLeague={league}
+        currentTeam={team}
+        onSwitch={(nextLeague, nextTeam) => {
+          setDrawerOpen(false);
+          onSwitchTeam(nextLeague, nextTeam);
+        }}
+      />
     </div>
   );
 }

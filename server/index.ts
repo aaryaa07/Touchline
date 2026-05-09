@@ -86,8 +86,12 @@ app.get('/api/leagues/:league/teams', async (req, res) => {
 app.get('/api/leagues/:league/standings', async (req, res) => {
   try {
     const { league } = req.params;
-    const data = await cached(`standings:${league}`, () =>
-      getJSON(`${ESPN_V2}/${league}/standings`)
+    const seasonRaw = (req.query.season || '').toString();
+    const season = /^\d{4}$/.test(seasonRaw) ? seasonRaw : '';
+    const seasonQS = season ? `?season=${season}` : '';
+    const data = await cached(
+      `standings:${league}:${season || 'current'}`,
+      () => getJSON(`${ESPN_V2}/${league}/standings${seasonQS}`)
     );
     const entries =
       data.children?.[0]?.standings?.entries ??
@@ -115,6 +119,97 @@ app.get('/api/leagues/:league/standings', async (req, res) => {
     res.json(standings);
   } catch (e: any) {
     console.error('standings', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---------- LEAGUE CONTEXT (upcoming + recent fixtures) ----------
+function yyyymmdd(d: Date) {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}${m}${day}`;
+}
+
+app.get('/api/leagues/:league/context', async (req, res) => {
+  try {
+    const { league } = req.params;
+    const data = await cached(`context:${league}`, async () => {
+      const now = new Date();
+      const past = new Date(now.getTime() - 10 * 86400_000);
+      const future = new Date(now.getTime() + 21 * 86400_000);
+      const range = `${yyyymmdd(past)}-${yyyymmdd(future)}`;
+      return getJSON(`${ESPN}/${league}/scoreboard?dates=${range}`);
+    });
+
+    const events = (data as any).events || [];
+    type Match = {
+      id: string;
+      date: string;
+      home: string;
+      homeShort?: string;
+      homeScore: number | null;
+      away: string;
+      awayShort?: string;
+      awayScore: number | null;
+      state: 'pre' | 'in' | 'post' | 'unknown';
+      status: string;
+      competition?: string;
+    };
+
+    const matches: Match[] = events.map((e: any) => {
+      const comp = e.competitions?.[0];
+      const competitors = comp?.competitors || [];
+      const home = competitors.find((c: any) => c.homeAway === 'home') || competitors[0] || {};
+      const away = competitors.find((c: any) => c.homeAway === 'away') || competitors[1] || {};
+      const state = (comp?.status?.type?.state || 'unknown') as Match['state'];
+      const completed = !!comp?.status?.type?.completed;
+      const parseScore = (c: any) => {
+        const s = c?.score?.value ?? c?.score?.displayValue ?? c?.score;
+        const n = parseInt(String(s ?? ''), 10);
+        return Number.isFinite(n) ? n : null;
+      };
+      return {
+        id: String(e.id),
+        date: e.date,
+        home: home.team?.displayName,
+        homeShort: home.team?.shortDisplayName,
+        homeScore: completed ? parseScore(home) : null,
+        away: away.team?.displayName,
+        awayShort: away.team?.shortDisplayName,
+        awayScore: completed ? parseScore(away) : null,
+        state,
+        status: comp?.status?.type?.shortDetail || comp?.status?.type?.description || '',
+        competition: e.season?.displayName,
+      };
+    });
+
+    const nowMs = Date.now();
+    const recent = matches
+      .filter(
+        (m) =>
+          m.state === 'post' &&
+          new Date(m.date).getTime() <= nowMs &&
+          m.home &&
+          m.away
+      )
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .slice(0, 10);
+
+    const upcoming = matches
+      .filter(
+        (m) =>
+          (m.state === 'pre' || m.state === 'in') &&
+          new Date(m.date).getTime() >= nowMs - 6 * 3600_000 && // include matches in progress
+          m.home &&
+          m.away
+      )
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+      .slice(0, 12);
+
+    res.json({ upcoming, recent });
+  } catch (e: any) {
+    console.error('context', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -603,12 +698,390 @@ app.get('/api/teams/:league/:teamId/profile', async (req, res) => {
   }
 });
 
-// ---------- CHAT (Groq, grounded) ----------
+// ---------- LEAGUE LEADERS (Wikipedia season article scrape) ----------
+const WIKI_LEAGUE_NAME: Record<string, string> = {
+  'eng.1': 'Premier_League',
+  'esp.1': 'La_Liga',
+  'ger.1': 'Bundesliga',
+  'ita.1': 'Serie_A',
+  'fra.1': 'Ligue_1',
+};
+
+function parseLeadersTable(html: string): {
+  rank: number;
+  player: string;
+  club: string;
+  value: number;
+}[] {
+  const $ = cheerio.load(html);
+  const out: { rank: number; player: string; club: string; value: number }[] = [];
+  let lastRank = 0;
+  let lastValue = 0;
+
+  $('table.wikitable')
+    .first()
+    .find('tr')
+    .each((idx, tr) => {
+      if (idx === 0) return; // skip header
+      const $tr = $(tr);
+      $tr.find('sup, .reference, .flagicon').remove();
+      const cells = $tr
+        .find('td, th')
+        .map((_, c) =>
+          $(c)
+            .text()
+            .replace(/\[[^\]]*\]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+        )
+        .get();
+      if (cells.length === 0) return;
+
+      let i = 0;
+      let rank = lastRank;
+      if (cells[i] && /^\d+\.?$/.test(cells[i])) {
+        rank = parseInt(cells[i], 10);
+        lastRank = rank;
+        i++;
+      }
+      const player = cells[i++] || '';
+      const club = cells[i++] || '';
+      const valueRaw = cells[i++];
+
+      let value = lastValue;
+      if (valueRaw && /\d/.test(valueRaw)) {
+        value = parseInt(valueRaw.match(/\d+/)?.[0] || '0', 10);
+        lastValue = value;
+      }
+
+      if (
+        player &&
+        player.length < 60 &&
+        !/^-+$/.test(player) &&
+        rank > 0 &&
+        value > 0
+      ) {
+        out.push({ rank, player, club, value });
+      }
+    });
+
+  return out.slice(0, 10);
+}
+
+app.get('/api/leagues/:league/leaders', async (req, res) => {
+  try {
+    const { league } = req.params;
+    const seasonRaw = (req.query.season || '').toString();
+    const season = /^\d{4}$/.test(seasonRaw)
+      ? parseInt(seasonRaw, 10)
+      : new Date().getFullYear();
+
+    const leagueWiki = WIKI_LEAGUE_NAME[league];
+    if (!leagueWiki) {
+      return res.json({
+        topScorers: [],
+        cleanSheets: [],
+        season,
+        source: 'unsupported league',
+      });
+    }
+
+    const yearEnd = String(season + 1).slice(-2);
+    // en-dash between years (Wikipedia convention)
+    const articleTitle = `${season}–${yearEnd}_${leagueWiki}`;
+
+    const data = await cached(
+      `leaders:${league}:${season}`,
+      async () => {
+        const sections = await wikiSections(articleTitle);
+        if (!sections || sections.length === 0)
+          return { topScorers: [], cleanSheets: [] };
+
+        const findIdx = (pred: (line: string) => boolean) => {
+          const s = sections.find((sec: any) =>
+            pred((sec.line || '').replace(/<[^>]+>/g, '').toLowerCase().trim())
+          );
+          return s ? s.index : null;
+        };
+
+        const scorerIdx = findIdx((l) => /top.*(scorer|goalscorer)/.test(l));
+        const csIdx = findIdx((l) => /clean sheet/.test(l));
+
+        const [scorerHtml, csHtml] = await Promise.all([
+          scorerIdx
+            ? wikiSectionHtml(articleTitle, scorerIdx)
+            : Promise.resolve(''),
+          csIdx ? wikiSectionHtml(articleTitle, csIdx) : Promise.resolve(''),
+        ]);
+
+        return {
+          topScorers: scorerHtml ? parseLeadersTable(scorerHtml) : [],
+          cleanSheets: csHtml ? parseLeadersTable(csHtml) : [],
+        };
+      },
+      TTL_PROFILE
+    );
+
+    res.json({
+      ...data,
+      season,
+      source: `https://en.wikipedia.org/wiki/${encodeURIComponent(articleTitle)}`,
+    });
+  } catch (e: any) {
+    console.error('leaders', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---------- AGENT TOOLS (called by Groq during chat) ----------
+// Each returns a small JSON payload that the LLM can read. Errors are
+// returned in-band so the model can react gracefully rather than throwing.
+
+const TOOL_LEAGUES = ['eng.1', 'esp.1', 'ger.1', 'ita.1', 'fra.1'];
+
+async function tool_lookup_team(args: { team_name: string }) {
+  const q = (args.team_name || '').toLowerCase().trim();
+  if (!q) return { error: 'team_name is required' };
+  const hits: any[] = [];
+  for (const lg of TOOL_LEAGUES) {
+    try {
+      const data: any = await cached(`teams:${lg}`, () =>
+        getJSON(`${ESPN}/${lg}/teams?limit=50`)
+      );
+      const list = data?.sports?.[0]?.leagues?.[0]?.teams || [];
+      for (const wrap of list) {
+        const t = wrap.team;
+        const blob =
+          `${t.displayName} ${t.shortDisplayName} ${t.name} ${t.abbreviation}`.toLowerCase();
+        if (blob.includes(q)) {
+          hits.push({
+            league_code: lg,
+            team_id: String(t.id),
+            name: t.displayName,
+            shortName: t.shortDisplayName,
+            abbreviation: t.abbreviation,
+          });
+        }
+      }
+    } catch {
+      /* ignore one league failure */
+    }
+  }
+  if (hits.length === 0) return { error: `No team found matching "${args.team_name}"` };
+  return { matches: hits.slice(0, 5) };
+}
+
+async function tool_get_team_schedule(args: {
+  league_code: string;
+  team_id: string;
+}) {
+  const { league_code, team_id } = args;
+  if (!league_code || !team_id)
+    return { error: 'league_code and team_id are required' };
+  const data: any = await cached(`schedule:${league_code}:${team_id}`, () =>
+    getJSON(`${ESPN}/${league_code}/teams/${team_id}/schedule`)
+  ).catch((e: any) => ({ error: e.message }));
+  if (data?.error) return data;
+
+  const events = data.events || [];
+  const teamName = data.team?.displayName;
+  return {
+    team: teamName,
+    matches: events.slice(0, 25).map((e: any) => {
+      const comp = e.competitions?.[0];
+      const competitors = comp?.competitors || [];
+      const us = competitors.find((c: any) => String(c.team?.id) === team_id);
+      const them = competitors.find(
+        (c: any) => String(c.team?.id) !== team_id
+      );
+      const completed = !!comp?.status?.type?.completed;
+      const parseScore = (c: any) => {
+        const s = c?.score?.value ?? c?.score?.displayValue ?? c?.score;
+        const n = parseInt(String(s ?? ''), 10);
+        return Number.isFinite(n) ? n : null;
+      };
+      return {
+        date: e.date,
+        opponent: them?.team?.displayName,
+        home: us?.homeAway === 'home',
+        our_score: completed ? parseScore(us) : null,
+        their_score: completed ? parseScore(them) : null,
+        completed,
+        status: comp?.status?.type?.shortDetail,
+        competition: comp?.notes?.[0]?.headline || e.season?.displayName,
+      };
+    }),
+  };
+}
+
+async function tool_get_team_roster(args: {
+  league_code: string;
+  team_id: string;
+}) {
+  const { league_code, team_id } = args;
+  if (!league_code || !team_id)
+    return { error: 'league_code and team_id are required' };
+  const data: any = await cached(`roster:${league_code}:${team_id}`, () =>
+    getJSON(`${ESPN}/${league_code}/teams/${team_id}/roster`)
+  ).catch((e: any) => ({ error: e.message }));
+  if (data?.error) return data;
+
+  const out: any[] = [];
+  const flatten = (arr: any[]) => {
+    for (const a of arr) {
+      if (a?.items && Array.isArray(a.items)) flatten(a.items);
+      else
+        out.push({
+          name: a.fullName || a.displayName,
+          jersey: a.jersey,
+          position: a.position?.displayName || a.position?.abbreviation,
+          age: a.age,
+          nationality: a.citizenship || a.birthPlace?.country,
+        });
+    }
+  };
+  flatten(data.athletes || []);
+  return {
+    team: data.team?.displayName,
+    coach: data.coach?.[0]?.firstName
+      ? `${data.coach[0].firstName} ${data.coach[0].lastName || ''}`.trim()
+      : data.coach?.[0]?.displayName,
+    squad_size: out.length,
+    players: out.slice(0, 35),
+  };
+}
+
+async function tool_get_team_standing(args: {
+  league_code: string;
+  team_id: string;
+}) {
+  const { league_code, team_id } = args;
+  if (!league_code || !team_id)
+    return { error: 'league_code and team_id are required' };
+  const data: any = await cached(`standings:${league_code}`, () =>
+    getJSON(`${ESPN_V2}/${league_code}/standings`)
+  ).catch((e: any) => ({ error: e.message }));
+  if (data?.error) return data;
+
+  const entries =
+    data.children?.[0]?.standings?.entries || data.standings?.entries || [];
+  const me = entries.find((e: any) => String(e.team?.id) === team_id);
+  if (!me) return { error: 'Team not found in standings' };
+  const stats: Record<string, any> = Object.fromEntries(
+    (me.stats || []).map((s: any) => [s.name, s.value ?? s.displayValue])
+  );
+  return {
+    team: me.team.displayName,
+    rank: Number(stats.rank) || null,
+    played: Number(stats.gamesPlayed) || null,
+    wins: Number(stats.wins) || null,
+    draws: Number(stats.ties) || null,
+    losses: Number(stats.losses) || null,
+    points: Number(stats.points) || null,
+    gd: Number(stats.pointDifferential) || null,
+    total_teams: entries.length,
+  };
+}
+
+const AGENT_TOOLS = [
+  {
+    type: 'function' as const,
+    function: {
+      name: 'lookup_team',
+      description:
+        'Find a football club by name across the top 5 European leagues (Premier League / La Liga / Bundesliga / Serie A / Ligue 1). Returns league_code + team_id you can pass to other tools. Use this whenever the user asks about a team that is NOT the one they are currently following.',
+      parameters: {
+        type: 'object',
+        properties: {
+          team_name: {
+            type: 'string',
+            description:
+              'Team name or partial name, e.g. "Liverpool", "Bayern", "PSG", "Inter".',
+          },
+        },
+        required: ['team_name'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'get_team_schedule',
+      description:
+        "Fetch a team's full season schedule — past results AND upcoming fixtures. Use for: when does X play next, what was the score in their last match, head-to-head lookups (call once per team and compare).",
+      parameters: {
+        type: 'object',
+        properties: {
+          league_code: {
+            type: 'string',
+            description:
+              'ESPN league code: eng.1, esp.1, ger.1, ita.1, or fra.1.',
+          },
+          team_id: { type: 'string', description: 'ESPN team id (string).' },
+        },
+        required: ['league_code', 'team_id'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'get_team_roster',
+      description:
+        "Get a team's current squad (players, positions, jerseys, ages, nationality) and current head coach. Use for squad / lineup / 'who plays for X' questions.",
+      parameters: {
+        type: 'object',
+        properties: {
+          league_code: {
+            type: 'string',
+            description: 'ESPN league code.',
+          },
+          team_id: { type: 'string', description: 'ESPN team id.' },
+        },
+        required: ['league_code', 'team_id'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'get_team_standing',
+      description:
+        "Get a team's current league standing — rank, points, W/D/L, goal difference, total teams in the league. Use when the user asks where a team sits in the table.",
+      parameters: {
+        type: 'object',
+        properties: {
+          league_code: {
+            type: 'string',
+            description: 'ESPN league code.',
+          },
+          team_id: { type: 'string', description: 'ESPN team id.' },
+        },
+        required: ['league_code', 'team_id'],
+      },
+    },
+  },
+];
+
+async function runTool(name: string, args: any): Promise<any> {
+  try {
+    if (name === 'lookup_team') return await tool_lookup_team(args);
+    if (name === 'get_team_schedule') return await tool_get_team_schedule(args);
+    if (name === 'get_team_roster') return await tool_get_team_roster(args);
+    if (name === 'get_team_standing')
+      return await tool_get_team_standing(args);
+    return { error: `Unknown tool: ${name}` };
+  } catch (e: any) {
+    return { error: e.message || 'tool failed' };
+  }
+}
+
+// ---------- CHAT (Groq, grounded + agentic tools) ----------
 app.post('/api/chat', async (req, res) => {
   try {
     const { messages = [], context = {} } = req.body || {};
-    const standings = (context.standings || []).slice(0, 6);
-    const headlines = (context.headlines || []).slice(0, 6);
+    const standings = (context.standings || []).slice(0, 5);
+    const headlines = (context.headlines || []).slice(0, 4);
     const form = context.form || [];
 
     const standingsBlock = standings.length
@@ -619,6 +1092,30 @@ app.post('/api/chat', async (req, res) => {
           )
           .join('\n')
       : 'unavailable';
+
+    const fmtDate = (iso: string) => {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return iso;
+      return d.toUTCString().replace(/ \d\d:\d\d:\d\d GMT/, '').trim();
+    };
+
+    const upcomingFixtures = (context.upcomingFixtures || []).slice(0, 10);
+    const recentResults = (context.recentResults || []).slice(0, 10);
+
+    const fixturesBlock = upcomingFixtures.length
+      ? upcomingFixtures
+          .map((m: any) => `${fmtDate(m.date)}: ${m.home} vs ${m.away}`)
+          .join('\n')
+      : 'no upcoming fixtures loaded';
+
+    const resultsBlock = recentResults.length
+      ? recentResults
+          .map(
+            (m: any) =>
+              `${fmtDate(m.date)}: ${m.home} ${m.homeScore}-${m.awayScore} ${m.away}`
+          )
+          .join('\n')
+      : 'no recent league results loaded';
 
     const formBlock = form.length
       ? form
@@ -633,41 +1130,157 @@ app.post('/api/chat', async (req, res) => {
       ? headlines.map((h: string, i: number) => `${i + 1}. ${h}`).join('\n')
       : 'no recent headlines provided';
 
+    const topScorers = (context.topScorers || []).slice(0, 8);
+    const cleanSheets = (context.cleanSheets || []).slice(0, 6);
+    const scorersBlock = topScorers.length
+      ? topScorers
+          .map((s: any) => `${s.rank}. ${s.player} (${s.club}) — ${s.value} goals`)
+          .join('\n')
+      : 'unavailable';
+    const cleanSheetsBlock = cleanSheets.length
+      ? cleanSheets
+          .map((s: any) => `${s.rank}. ${s.player} (${s.club}) — ${s.value} CS`)
+          .join('\n')
+      : 'unavailable';
+
+    const seasonNum = Number(context.season) || new Date().getFullYear();
+    const seasonLabel = `${String(seasonNum).slice(-2)}/${String(seasonNum + 1).slice(-2)}`;
+    const isCurrent = seasonNum === new Date().getFullYear();
+    const seasonNote = isCurrent
+      ? `Current season is ${seasonLabel}. The grounding data below is live.`
+      : `THE USER IS VIEWING A HISTORICAL SEASON: ${seasonLabel}. Standings, top scorers, clean sheets below reflect that year. Form, ownership and headlines remain CURRENT (today's data) — make this clear if it matters to your answer.`;
+
     const positionLine = context.standingSummary
       ? `Current position: ${context.standingSummary}.`
       : '';
 
-    const sys = `You are TOUCHLINE, a sharp, friendly football assistant.
-The user follows ${context.team || 'their team'} in ${context.league || 'their league'}.
+    const userTeam = context.team || 'their team';
+    const userLeague = context.league || 'their league';
+    const idHint =
+      context.teamId && context.leagueCode
+        ? `When calling tools for ${userTeam} specifically, use league_code="${context.leagueCode}" and team_id="${context.teamId}" — no lookup needed for them.`
+        : '';
 
-GROUNDING DATA (only source of truth — do not invent specifics beyond this):
+    const sys = `You are TOUCHLINE, a sharp, friendly football assistant.
+The user follows ${userTeam} in ${userLeague}.
+${seasonNote}
+${idHint}
+
+GROUNDING DATA (use first; treat as fresh, accurate, from ESPN/Wikipedia):
 ${positionLine}
-Recent form (most recent first): ${formBlock}
-Top of table:
+${context.team || 'Their team'}'s recent form (most recent first): ${formBlock}
+Top of table${isCurrent ? '' : ` (${seasonLabel})`}:
 ${standingsBlock}
-Latest headlines:
+Top scorers${isCurrent ? '' : ` (${seasonLabel})`}:
+${scorersBlock}
+Most clean sheets${isCurrent ? '' : ` (${seasonLabel})`}:
+${cleanSheetsBlock}
+Recent results across the league (last ~10 days, live):
+${resultsBlock}
+Upcoming fixtures in the league (next ~3 weeks, live):
+${fixturesBlock}
+Latest headlines (live):
 ${headlineBlock}
 
-RULES
-- Stay grounded in the data above. If a question needs data not provided (e.g., a player stat, an exact transfer fee, an upcoming fixture date), say "I don't have that exact data right now" and offer what you DO know.
-- Be concise: 2–4 short sentences by default. No markdown headers, no bullet lists unless explicitly asked.
-- Tone: confident, casual, sporty — like a mate at the pub who actually knows football.
-- If the user asks something off-topic (non-football), gently redirect.
-- Never fabricate scorelines, dates, lineups, or transfer rumours.`;
+TOOLS (call when grounding data isn't enough):
+- lookup_team(team_name) — find ANY team in the top 5 leagues, returns league_code + team_id
+- get_team_schedule(league_code, team_id) — full season schedule for a team
+- get_team_roster(league_code, team_id) — current squad + coach
+- get_team_standing(league_code, team_id) — current league position
+Call them when the question is about a team OUTSIDE the user's current view, or about squad / specific past matches / detailed standings the grounding data doesn't cover. To answer cross-team questions (e.g. "is Liverpool playing this weekend?"), call lookup_team first, then the relevant fetcher. Don't call tools for what the grounding data already shows.
 
-    const completion = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      temperature: 0.45,
-      max_tokens: 500,
-      messages: [{ role: 'system', content: sys }, ...messages],
-    });
+STYLE
+- Concise: 2–4 short sentences by default. No markdown headers, bullets only when explicitly asked.
+- Confident, casual, sporty tone — like a mate at the pub who actually knows football.
+- Never fabricate scorelines, dates, lineups, or transfer rumours. If a tool fails or data isn't found, say "I couldn't pull that up right now."
+- Off-topic (non-football) → gently redirect.`;
 
-    res.json({
-      reply: completion.choices[0]?.message?.content ?? '',
-    });
+    type AnyMsg = { role: string; content?: any; tool_calls?: any; tool_call_id?: string };
+    const convo: AnyMsg[] = [{ role: 'system', content: sys }, ...messages];
+    const toolsUsed: { name: string; args: any }[] = [];
+    let final = '';
+
+    // Translate any Groq SDK error into a friendly message the user can read,
+    // so the chat panel never shows raw HTTP 5xx. Status comes from the SDK.
+    const friendlyFromGroqError = (e: any): string => {
+      const status = e?.status || e?.response?.status;
+      if (status === 429) {
+        return "I'm being rate-limited by the model right now — give me ten seconds and ask again.";
+      }
+      if (status === 401 || status === 403) {
+        return "The AI key doesn't seem to be authorising — let the dev know.";
+      }
+      if (status && status >= 500) {
+        return 'Groq took a beat off. Try that again in a second.';
+      }
+      if (/timeout|network|fetch failed/i.test(e?.message || '')) {
+        return "Couldn't reach the AI just now. One more time?";
+      }
+      return "Hit a snag answering that. Try rephrasing?";
+    };
+
+    for (let iter = 0; iter < 4; iter++) {
+      let completion;
+      try {
+        completion = await groq.chat.completions.create({
+          model: 'llama-3.3-70b-versatile',
+          temperature: 0.4,
+          max_tokens: 600,
+          messages: convo as any,
+          tools: AGENT_TOOLS as any,
+          tool_choice: 'auto',
+        });
+      } catch (e: any) {
+        console.warn(`[chat] groq error iter=${iter}: ${e?.status || ''} ${e?.message}`);
+        final = friendlyFromGroqError(e);
+        break;
+      }
+      const msg = completion.choices[0]?.message;
+      if (!msg) break;
+      // Push assistant message back into conversation (preserve tool_calls)
+      convo.push({
+        role: 'assistant',
+        content: msg.content ?? '',
+        ...(msg.tool_calls ? { tool_calls: msg.tool_calls } : {}),
+      });
+
+      const calls = msg.tool_calls || [];
+      if (calls.length === 0) {
+        final = msg.content ?? '';
+        break;
+      }
+
+      // Execute every tool call, append results
+      for (const tc of calls) {
+        let args: any = {};
+        try {
+          args = JSON.parse(tc.function.arguments || '{}');
+        } catch {
+          /* keep empty */
+        }
+        const result = await runTool(tc.function.name, args);
+        toolsUsed.push({ name: tc.function.name, args });
+        convo.push({
+          role: 'tool',
+          tool_call_id: tc.id,
+          content: JSON.stringify(result).slice(0, 8000), // safety cap
+        });
+      }
+    }
+
+    if (!final) {
+      final = "I couldn't pull that one up — could you rephrase?";
+    }
+
+    res.json({ reply: final, toolsUsed });
   } catch (e: any) {
     console.error('chat', e.message);
-    res.status(500).json({ error: e.message });
+    // Always return 200 with a graceful message — the chat UI shouldn't
+    // surface raw HTTP errors to the user.
+    res.json({
+      reply: "Something hiccupped on my side — give me a second and try again.",
+      toolsUsed: [],
+    });
   }
 });
 
@@ -682,7 +1295,34 @@ if (fs.existsSync(distDir)) {
   console.log(`[touchline] serving SPA from ${distDir}`);
 }
 
+// ---------- BOOT: warm the teams index ----------
+// We pre-populate the in-memory cache with all 5 leagues' team rosters so
+// the agent's `lookup_team` tool — which already reads from this cache —
+// answers from local memory on the first call instead of fanning out 5
+// HTTP requests to ESPN. This effectively turns the cache into a hot
+// "teams index dataset" without an extra storage layer or persistence.
+async function warmTeamsIndex() {
+  const start = Date.now();
+  await Promise.all(
+    TOOL_LEAGUES.map((lg) =>
+      cached(`teams:${lg}`, () => getJSON(`${ESPN}/${lg}/teams?limit=50`)).catch(
+        (e: any) => console.warn(`[warm] ${lg} failed: ${e.message}`)
+      )
+    )
+  );
+  // Count what landed
+  let total = 0;
+  for (const lg of TOOL_LEAGUES) {
+    const data: any = cache.get(`teams:${lg}`)?.data;
+    total += data?.sports?.[0]?.leagues?.[0]?.teams?.length || 0;
+  }
+  console.log(
+    `[touchline] teams index warmed: ${total} clubs across ${TOOL_LEAGUES.length} leagues (${Date.now() - start}ms)`
+  );
+}
+
 const PORT = Number(process.env.PORT) || 3001;
 app.listen(PORT, () => {
   console.log(`[touchline] api on :${PORT}`);
+  warmTeamsIndex().catch(() => {});
 });
